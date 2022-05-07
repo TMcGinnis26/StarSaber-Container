@@ -30,7 +30,7 @@ enum states
 };
 
 float lastAlt, simPres;
-unsigned int lastTime, lastPoll; 
+unsigned int lastReadAlt, lastPoll; 
 states prev_state, state;
 String cmd;
 
@@ -49,9 +49,9 @@ bool recover()
 //***Primary Flight State Functions***//
 void Standby()
 {
-
+    //read sensors with sample_sensors()
   
-  if(get_altitude() > 3)
+  if(get_altitude() > 3)//switch states when necessary
   {
     state = Asc;
   }
@@ -60,7 +60,8 @@ void Standby()
 
 void Ascend()
 {
-
+    
+    //read sensors with sample_sensors()
   
   if(1)//if altitude has decreased
   {
@@ -71,7 +72,7 @@ void Ascend()
 
 void Stage1Desc()
 {
-
+    //read sensors with sample_sensors()
   
   if(get_altitude() <= 400)//if altitude is or < 400m
   {
@@ -84,7 +85,8 @@ void Stage1Desc()
 void Stage2Desc()
 {
 
-  
+  //read sensors with sample_sensors()
+
   if(get_altitude() <= 300)//if altitude is or < 300m
   {
     //lower the tethered payload
@@ -95,9 +97,10 @@ void Stage2Desc()
 
 void Stage3Desc()
 {
-
+    //read sensors with sample_sensors()
+    //poll payload with poll_payload()
   
-    if(get_altitude() > lastAlt-1 && get_altitude() < lastAlt+1)//if altitude is still within +-1 m
+    if(check_landing())//if landed = true
   {
     state = Grnd;
   }
@@ -118,22 +121,41 @@ void parse_packet()
 
 void sample_sensors()
 {
-  
+  //sample sensors if been 250ms
   return;
 }
 
-void transmit_data(int reciever)
+void poll_payload()
 {
-  //reciever values: 0-payload 1-ground
-  if(reciever == 1)
-  {
-    //send container telemetry packet to ground
-    
-  }else if(reciever == 0)
-  {
-    //poll the payload for data
-  }
+    //poll payload if been 250ms
+    return;
 }
+
+void transmit_data()
+{
+    //send packet from container to GCS (if CX is on) if been 1 sec
+}
+
+bool check_landing()
+{
+    if (millis() - lastReadAlt >= 1000)//check every 1 sec
+    {
+        altitude = get_altitude();
+        if (altitude < lastAlt +1 && altitude > lastAlt -1)
+        {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+void saveRecovery()
+{
+    //save all current data for recovery
+    return;
+}
+
 
 float get_altitude()
 {
@@ -166,12 +188,17 @@ Serial1.begin(115200);
 
 
   
-  
+  /*Temporarily remove the recovery feature
  if(!recover())
  {
   state = Stby; //default standby state
+  //sample the barometer to get the sea level pressure
  }
+*/
 
+
+state = Stby;//temporary
+//sample barom for sea level pressure
 }
 
 void loop() {
@@ -200,7 +227,8 @@ void loop() {
       {
         //error loop
       }
-    
   }
+  //transmit_data()
+  //check for commands after each flight function, parse_packet() if serial recieved
 
 }
