@@ -29,10 +29,13 @@ enum states
   Grnd
 };
 
-float lastAlt, simPres;
+float lastAlt, simPres, seaLvlPres;
 unsigned int lastReadAlt, lastPoll; 
 states prev_state, state;
 String cmd;
+
+Adafruit_BME280 bme;
+Adafruit_BNO055 myIMU = Adafruit_BNO055();
 
 
 //***Recovery Functions***//
@@ -45,8 +48,9 @@ bool recover()
 
 
 
-
+////////////////////////////////////////
 //***Primary Flight State Functions***//
+////////////////////////////////////////
 void Standby()
 {
     //read sensors with sample_sensors()
@@ -112,7 +116,40 @@ void Grounded()//grounded loop
   return;
 }
 
+
+
+/////////////////////////////////////
 //***Secondary Flight Functions***///
+/////////////////////////////////////
+void sensor_checklist()
+{
+    Serial.println();
+    //begin barometer
+    if (!bme.begin())
+    {
+        Serial.println("BME280\t"+(String)'#');
+    }
+    else
+    {
+        Serial.println("BME280\t"+(String)'@');//if BME starts successfully
+        seaLvlPres = bme.readPressure() / 100.0;
+    }
+
+    if (!myIMU.begin())
+    {
+        Serial.println("IMU\t" + (String)'#');
+    }
+    else
+    {
+        Serial.println("IMU\t" + (String)'@');//if IMU starts successfully
+    }
+
+
+
+    Serial.println("System Ready");
+    return;
+}
+
 void parse_packet()
 {
   
@@ -185,6 +222,10 @@ void setup() {
   //Start All Sensors
 Serial.begin(115200);
 Serial1.begin(115200);
+
+sensor_checklist();
+
+Serial.println("Cur Altitude: " + (String)bme.readAltitude(seaLvlPres));
 
 
   
