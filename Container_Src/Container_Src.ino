@@ -124,24 +124,25 @@ void Grounded()//grounded loop
 void sensor_checklist()
 {
     Serial.println();
-    //begin barometer
-    if (!bme.begin())
     {
-        Serial.println("BME280\t"+(String)'#');
-    }
-    else
-    {
-        Serial.println("BME280\t"+(String)'@');//if BME starts successfully
-        seaLvlPres = bme.readPressure() / 100.0;
-    }
+        if (!bme.begin())//Begin Barometer
+        {
+            Serial.println("BME280\t" + (String)'#');
+        }
+        else
+        {
+            Serial.println("BME280\t" + (String)'@');//if BME starts successfully
+            seaLvlPres = bme.readPressure() / 100.0;
+        }
 
-    if (!myIMU.begin())
-    {
-        Serial.println("IMU\t" + (String)'#');
-    }
-    else
-    {
-        Serial.println("IMU\t" + (String)'@');//if IMU starts successfully
+        if (!myIMU.begin())//Being IMU
+        {
+            Serial.println("IMU\t" + (String)'#');
+        }
+        else
+        {
+            Serial.println("IMU\t" + (String)'@');//if IMU starts successfully
+        }
     }
 
 
@@ -187,7 +188,7 @@ bool check_landing()
     return false;
 }
 
-void saveRecovery()
+void updateEEPROM()
 {
     //save all current data for recovery
     return;
@@ -221,11 +222,12 @@ float get_altitude()
 void setup() {
   //Start All Sensors
 Serial.begin(115200);
-Serial1.begin(115200);
+Serial1.begin(115200);//ground xbee
+Serial2.begin(115200);//payload xbee
 
 sensor_checklist();
 
-Serial.println("Cur Altitude: " + (String)bme.readAltitude(seaLvlPres));
+//Serial.println("Cur Altitude: " + (String)bme.readAltitude(seaLvlPres));
 
 
   
