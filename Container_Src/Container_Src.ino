@@ -113,6 +113,8 @@ void Stage3Desc()
 
 void Grounded()//grounded loop
 {
+    //buzzer
+    //LED
   return;
 }
 
@@ -124,26 +126,26 @@ void Grounded()//grounded loop
 void sensor_checklist()
 {
     Serial.println();
-    {
+    Serial.print("BME280\t");
         if (!bme.begin())//Begin Barometer
         {
-            Serial.println("BME280\t" + (String)'#');
+             Serial.println((String)'#');
         }
         else
         {
-            Serial.println("BME280\t" + (String)'@');//if BME starts successfully
+            Serial.println((String)'@');//if BME starts successfully
             seaLvlPres = bme.readPressure() / 100.0;
         }
 
-        if (!myIMU.begin())//Being IMU
+     Serial.print("IMU\t");
+        if (!myIMU.begin())//Begin IMU
         {
-            Serial.println("IMU\t" + (String)'#');
+            Serial.println((String)'#');
         }
         else
         {
-            Serial.println("IMU\t" + (String)'@');//if IMU starts successfully
+            Serial.println((String)'@');//if IMU starts successfully
         }
-    }
 
 
 
@@ -210,7 +212,7 @@ float get_altitude()
     readAlt = 0.0;
   }else
   {
-    //read current measured pressure
+      readAlt = ;//
   }
 
   return readAlt;
