@@ -280,63 +280,7 @@ void setup() {
 ////////////////////////////////////////
 //***Primary Flight State Functions***//
 ////////////////////////////////////////
-void Standby()
-{
 
-  
-    return;
-}
-
-void Ascend()
-{
-    //read sensors with sample_sensors()
-    if (TRUE)
-    {
-
-    }
-    if (get_altitude() < lastAlt)//if altitude has decreased
-    {
-        state = Desc1;
-    }
-    return;
-}
-
-void Stage1Desc()
-{
-    //read sensors with sample_sensors()
-
-    if (get_altitude() <= 400)//if altitude is or < 400m
-    {
-        //deploy the larger parachute
-        state = Desc2;
-    }
-    return;
-}
-
-void Stage2Desc()
-{
-
-    //read sensors with sample_sensors()
-
-    if (get_altitude() <= 300)//if altitude is or < 300m
-    {
-        //lower the tethered payload
-        state = Desc3;
-    }
-    return;
-}
-
-void Stage3Desc()
-{
-    //read sensors with sample_sensors()
-    //poll payload with poll_payload()
-
-    if (check_landing())//if landed = true
-    {
-        state = Grnd;
-    }
-    return;
-}
 
 void Grounded()//grounded loop
 {
@@ -359,21 +303,23 @@ void loop() {
         }
         break;
     case Asc:
-        if (millis() - lastReadAlt > 500)
+        if (millis() - lastReadAlt > 750)
         {
-            if (altitude < lastAlt && altitude > 600)
+            Serial1.println("TESTING IF DESCENDING");
+            if (altitude < lastAlt && altitude > 400)
             {
                 state = Desc1;
             }
             else
             {
+                Serial1.println(String(altitude) + "from " + String(lastAlt));
                 lastReadAlt = millis();
                 lastAlt = altitude;
             }
         }
         break;
     case Desc1:
-        if (millis() - lastReadAlt > 500)
+        if (millis() - lastReadAlt >= 500)
         {
             if (altitude <= 400)
             {
@@ -386,7 +332,7 @@ void loop() {
         }
         break;
     case Desc2:
-        if (millis() - lastReadAlt > 1000)
+        if (millis() - lastReadAlt >= 500)
         {
             if (altitude <= 300)
             {
@@ -401,7 +347,7 @@ void loop() {
         }
         break;
     case Desc3:
-        if (millis() - lastReadAlt > 2500)
+        if (millis() - lastReadAlt > 1500)
         {
             if (altitude < lastAlt+1 && altitude >lastAlt-1)
             {
