@@ -16,20 +16,20 @@
 
 #define GPSSerial Serial3
 #define TESTLED 9
+#define TeamID 1092
 
 
 
 //Telemetry Values
-float voltage, altitude, temp, pError, GPS_Lat, GPS_Lon, GPS_alt;//voltage draw, altitude, temperature, pointing error
+float voltage, temp, pError, GPS_Lat, GPS_Lon, GPS_alt;//voltage draw, altitude, temperature, pointing error
 int packets = 1, mish = 0, mismin = 0;//Packet Count, Flight State(moved to operation vars), Mission Hours, Mission Minutes 
 int GPS_Sats, GPS_hour, GPS_min, CX = 1;//GPS Sattelites, GPS: Hour, GPS:Minutes, TelemetryState; 
-float missec = 0.0, GPS_sec;//Mission seconds + milliseconds
-bool cx = false;//Release state of tethered payload, telemetry state (on/off)
+float missec = 0.0, GPS_sec;//Mission seconds + milliseconds, gps time seconds
 char mode = 'F';//F for flight, S for simulation
-String echo = "TMP", curPacket = "";//Last command with its arguments, no space
-int TeamID = 1092;
+String echo = "NUL", curPacket = "";//Last command with its arguments, no space
 bool ledstat = false;
-char tpRelease = 'N';
+char tpRelease = 'N';//Default payload not released 'T' for released?
+float altitude;
 
 //Operation Values
 enum states
@@ -42,11 +42,12 @@ enum states
     Grnd = 5
 };
 
-float lastAlt = -5.0, simPres = 0.0, seaLvlPres, curPres;
-unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime, RTCStartMillis, lastBlink;//last time readingAltitude, sampling Cont. sensors, polling payload 
+float lastAlt = -5.0, simAlt = 0.0, seaLvlPres = 988.0, curPres;
+unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime, RTCMillis,lastBlink;//last time readingAltitude, sampling Cont. sensors, polling payload 
 states prev_state, state;
 String cmd, tempString;
 DateTime now;
+
 
 
 Adafruit_INA260 ina260 = Adafruit_INA260();
@@ -76,27 +77,41 @@ bool recover()
 /////////////////////////////////////
 void I2C_Sensor_Init()
 {
-    rtc.begin();
+    if (!rtc.begin())
+    {
+        Serial1.println("FAILED TO START RTC");
+    }
     rtc.adjust(DateTime(2022,1,1,0,0,0));
-    RTCStartMillis = millis();
     digitalWrite(TESTLED, HIGH);
     //begin sensors
-    ina260.begin();
-    //bme.begin();
-    bmp.begin_I2C();
+    if (!ina260.begin())
+    {
+        Serial1.println("FAILED TO START INA");
+    }
+    
+    if (!bmp.begin_I2C())
+    {
+        Serial1.println("BMP FAILED TO START");
+    }
+
+
+
+    for (int i = 0; i < 5; i++)
+    {
+        bmp.performReading();
+        curPres = bmp.pressure / 100.0;
+        altitude = bmp.readAltitude(curPres);
+        delay(100);
+    }
+    seaLvlPres = curPres;//set sea level at current altitude
+
+   
     if (!rtc.begin())
     {
         Serial1.println("RTC NOT STARTED");
     }
-    Serial1.println("RTC STARTED");
-
-    for (int i = 0; i < 5; i++)
-        bmp.performReading();
-        curPres = bmp.pressure / 100.0;
-        altitude = bmp.readAltitude(curPres);
-        delay(10);
-    seaLvlPres = curPres;//set sea level at current altitude
-    altitude = get_altitude();
+    
+   
 
     digitalWrite(TESTLED, LOW);
     Serial1.println("System Ready");
@@ -105,16 +120,51 @@ void I2C_Sensor_Init()
 
 void read_serial()
 {
-    if (Serial1.available() > 0)
+    if (Serial2.available() > 0)
     {
-        while (Serial1.available() > 0)
+        while (Serial2.available() > 0 && Serial2.peek()!='\n')
         {
-            cmd += Serial1.readString();
+            curPacket += Serial2.read();
         }
-        if (cmd.substring(0,2) == "ST")
+        if (Serial2.peek()=='\n')
+        {
+            tempString = Serial2.read();
+        }
+
+        if(curPacket.substring(0, 6) == "1092,T")//if team matches && is Payload packet
+        {
+            
+            sample_sensors();
+
+            curPacket = curPacket.substring(4);//remove front of packet
+            cmd = String(TeamID) + ',' + String(mish) + ":" + String(mismin) + ":" + String(missec+RTCMillis)+","+packets;
+            cmd += curPacket;
+
+            Serial4.println(cmd);//record to open log
+            Serial1.println(cmd);//send to GND
+            packets++;
+        }
+        cmd = "";
+        curPacket = "";
+    }
+
+
+
+    if (Serial1.available() > 0)//if GND serial data is available
+    {
+        while (Serial1.available() > 0 && Serial1.peek() != '\n')
+        {
+            cmd += Serial1.read();
+        }
+        if (Serial1.peek() == '\n')
+        {
+            tempString = Serial1.read();
+        }
+
+        if (cmd.substring(0,2) == "ST")//set RTC time
         {
             rtc.begin();
-            Serial1.println(cmd);
+            //Serial1.println(cmd); // return CMD to GND
             
             String Hrs = cmd.substring(2,cmd.indexOf(":"));
             int HrsI = Hrs.toInt();
@@ -124,6 +174,13 @@ void read_serial()
             now = rtc.now();
             Serial1.println("SetTime: "+String(now.hour()) + ':' + String(now.minute())+':'+String(now.second()));
         }
+        if (cmd.substring(0, 4) == "SIMP")//set the current SIM pressure
+        {
+            double simPress;
+            //pull simPress from the packet
+
+            simAlt = 44330 * (1.0 - pow(simPress / seaLvlPres, 0.1903));//calculate altitude, given ground pressure
+        }
         
     }
     return;
@@ -131,19 +188,16 @@ void read_serial()
 
 void sample_sensors()
 {
-    if (millis() - lastSampleTime >= 50)
-    {
-        now = rtc.now();
-        bmp.performReading();
+    //if (millis() - lastSampleTime >= 75)
+    //{
+    
+    update_time();
+    bmp.performReading();
+    temp = bmp.temperature;
+    
+    voltage = ina260.readBusVoltage()*0.001;
     
     altitude = get_altitude();
-    temp = bmp.temperature;
-    voltage = ina260.readBusVoltage()*0.001;
-    mish = now.hour();
-    mismin = now.minute();
-    missec = now.second();
-
-    
 
     if (ledstat)
     {
@@ -179,31 +233,43 @@ void sample_sensors()
         GPS_Lon = 888;
         GPS_Sats = 888;
     }
+    
     lastSampleTime = millis();
-    }
+   // }
     return;
 }
 
+void update_time()
+{
+    now = rtc.now();
+    mish = now.hour();
+    mismin = now.minute();
+    RTCMillis = millis() % 1000;//calculate milliseconds
+    missec = now.second() + RTCMillis;
+    return;
+}
+
+
 void poll_payload()
 {
-    //poll payload if been 250ms
+    //poll CMD to payload
     return;
 }
 
 void downlink_telem()
 {
-    if ((millis() - lastCPoll) >= 980)//slightly faster than 1 sec
+    if ((millis() - lastCPoll) >= 900)//slightly faster than 1 sec
     {
-        sample_sensors();
-        //Serial1.println(String(get_altitude()));
         curPacket = String(String(TeamID) + ',' + mish + ':' + mismin + ':' + String(missec) + ',' + packets + ",C," + mode + ',' + tpRelease + ',' + String(altitude) + ',' + temp + ',' + voltage + ',' + GPS_hour + ':' + GPS_min + ':' + GPS_sec + ',' + GPS_Lat + ',' + GPS_Lon + ',' + GPS_alt + ',' + GPS_Sats + ',' + String(state) + ',' + echo);
-        Serial4.println(String(curPacket));
+        Serial4.println(String(curPacket));//write telemetry to open log
         if (CX == 1)
         {
             Serial1.println(String(curPacket));
-            packets++;
+            
         }
+        packets++;//increment packet count
         lastCPoll = millis();
+        curPacket = "";
     }
     else {
         return;
@@ -233,9 +299,11 @@ void updateEEPROM()
 
 float get_altitude()
 {
+    //Serial1.println("Test: " + String(bmp.readAltitude(seaLvlPres)));
+   // return bmp.readAltitude(seaLvlPres);
     if (mode == 'S')//if in simulation mode
     {
-        return simPres;
+        return simAlt;
     }
     else
     {
@@ -272,6 +340,11 @@ void setup() {
    }
   */
 
+    
+
+    
+    //Serial1.println("Ground pressure: " + String(curPres) + " ALT: " + String(bmp.readAltitude(seaLvlPres)) + " Function: " + altitude);
+    
 
     state = Stby;//temporary
     //sample barom for sea level pressure
@@ -293,33 +366,37 @@ void loop() {
     switch (state)
     {
     case Stby:
-        if (millis() - lastReadAlt > 500)//check every half second
+        if (millis() - lastReadAlt > 2000)//state check
         {
-            if (altitude > 5.0)
+            //Serial1.println(String(altitude));
+            if (altitude >= 20.0)
+            {
+                state = Asc;
+            }
+            else
             {
                 lastReadAlt == millis();
-                state = Asc;
+                lastAlt = altitude;
             }
         }
         break;
     case Asc:
-        if (millis() - lastReadAlt > 750)
+        if (millis() - lastReadAlt > 500)//state check
         {
-            Serial1.println("TESTING IF DESCENDING");
             if (altitude < lastAlt && altitude > 400)
             {
                 state = Desc1;
             }
             else
             {
-                Serial1.println(String(altitude) + "from " + String(lastAlt));
+               // Serial1.println(String(altitude) + "from " + String(lastAlt));
                 lastReadAlt = millis();
                 lastAlt = altitude;
             }
         }
         break;
     case Desc1:
-        if (millis() - lastReadAlt >= 500)
+        if (millis() - lastReadAlt >= 500)//state check
         {
             if (altitude <= 400)
             {
@@ -332,13 +409,13 @@ void loop() {
         }
         break;
     case Desc2:
-        if (millis() - lastReadAlt >= 500)
+        if (millis() - lastReadAlt >= 500)//state check
         {
             if (altitude <= 300)
             {
                 state = Desc3;
                 tpRelease = 'R';
-                
+                //send CMD to payload to turn on 
             }
             else
             {
@@ -347,7 +424,12 @@ void loop() {
         }
         break;
     case Desc3:
-        if (millis() - lastReadAlt > 1500)
+        if(millis() - lastTPoll >=240)//if time to poll payload
+        {
+            poll_payload();
+        }
+
+        if (millis() - lastReadAlt > 1000)//state check
         {
             if (altitude < lastAlt+1 && altitude >lastAlt-1)
             {
