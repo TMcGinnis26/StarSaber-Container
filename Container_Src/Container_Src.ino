@@ -23,11 +23,11 @@
 //Telemetry Values
 float voltage, temp, pError, GPS_Lat, GPS_Lon, GPS_alt;//voltage draw, altitude, temperature, pointing error
 int packets = 1, mish = 0, mismin = 0;//Packet Count, Flight State(moved to operation vars), Mission Hours, Mission Minutes 
-int GPS_Sats, GPS_hour, GPS_min, CX = 1;//GPS Sattelites, GPS: Hour, GPS:Minutes, TelemetryState; 
+int GPS_Sats, GPS_hour, GPS_min;//GPS Sattelites, GPS: Hour, GPS:Minutes, TelemetryState; 
 float missec = 0.0, GPS_sec;//Mission seconds + milliseconds, gps time seconds
 char mode = 'F';//F for flight, S for simulation
 String echo = "NUL", curPacket = "";//Last command with its arguments, no space
-bool ledstat = false;
+bool ledstat = false, CX = false;
 char tpRelease = 'N';//Default payload not released 'T' for released?
 float altitude;
 
@@ -43,12 +43,12 @@ enum states
 };
 
 float lastAlt = -5.0, simAlt = 0.0, seaLvlPres = 988.0, curPres;
-unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime, RTCMillis,lastBlink;//last time readingAltitude, sampling Cont. sensors, polling payload 
+unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime,lastBlink;//last time readingAltitude, sampling Cont. sensors, polling payload 
+double RTCMillis;
+int HrsI, MinI, SecI, lastDelim;
 states prev_state, state;
 String cmd, tempString;
 DateTime now;
-
-
 
 Adafruit_INA260 ina260 = Adafruit_INA260();
 //Adafruit_BME280 bme;
@@ -152,7 +152,7 @@ void read_serial()
 
     if (Serial1.available() > 0)//if GND serial data is available
     {
-        while (Serial1.available() > 0 && Serial1.peek() != '\n')
+        while (Serial1.available() > 0 && Serial1.peek() != '\n')//take in the command until NL character
         {
             cmd += Serial1.read();
         }
@@ -161,26 +161,53 @@ void read_serial()
             tempString = Serial1.read();
         }
 
-        if (cmd.substring(0,2) == "ST")//set RTC time
+        if (cmd.substring(0, 8) == "CMD,1092")//if packet is CMD for 1092
         {
-            rtc.begin();
-            //Serial1.println(cmd); // return CMD to GND
-            
-            String Hrs = cmd.substring(2,cmd.indexOf(":"));
-            int HrsI = Hrs.toInt();
-            Serial1.println(String(HrsI));
-            rtc.adjust(DateTime(2022,1,1, HrsI, 30, 30));
-            //rtc.adjust(DateTime("Jul 21 2015", "02:44:20"));
-            now = rtc.now();
-            Serial1.println("SetTime: "+String(now.hour()) + ':' + String(now.minute())+':'+String(now.second()));
-        }
-        if (cmd.substring(0, 4) == "SIMP")//set the current SIM pressure
-        {
-            double simPress;
-            //pull simPress from the packet
+            if (cmd.substring(9, 11) == "ST")//set RTC time
+            {
+                rtc.begin();
 
-            simAlt = 44330 * (1.0 - pow(simPress / seaLvlPres, 0.1903));//calculate altitude, given ground pressure
+                tempString = cmd.substring(12);
+                HrsI = tempString.substring(0, tempString.indexOf(':')).toInt();
+                lastDelim = tempString.indexOf(':');
+                MinI = tempString.substring(lastDelim + 1, tempString.indexOf(':', lastDelim + 1)).toInt();
+                lastDelim = tempString.indexOf(':', lastDelim + 1);
+                SecI = tempString.substring(lastDelim + 1).toInt();
+
+                rtc.adjust(DateTime(2022, 1, 1, HrsI, MinI, SecI));
+                //rtc.adjust(DateTime("Jul 21 2015", "02:44:20"));
+                now = rtc.now();
+                //Serial1.println("SetTime: " + String(now.hour()) + ':' + String(now.minute()) + ':' + String(now.second()));
+            }
+
+            if (cmd.substring(9, 13) == "SIMP")//set the current SIMP altitude
+            {
+                double simPress;
+                //pull simPress from the packet
+
+                simAlt = 44330 * (1.0 - pow(simPress / seaLvlPres, 0.1903));//calculate altitude, given ground pressure
+            }
+            
+            if (cmd.substring(9, 12) == "SIM")//interpret SIM command
+            {
+                //activate, enable, disable
+            }
+
+            if (cmd.substring(9,11)=="CX")//enable or disable Telemetry transmission
+            {
+                if (cmd.substring(12,14)=="ON")
+                {
+                    CX = true;
+                    echo = "CXON";
+                }
+                else if (cmd.substring(12,15)=="OFF")
+                {
+                    CX = false;
+                    echo = "CXOFF";
+                }
+            }
         }
+        
         
     }
     return;
@@ -241,10 +268,11 @@ void sample_sensors()
 
 void update_time()
 {
+    //double offset = 0.0;
     now = rtc.now();
     mish = now.hour();
     mismin = now.minute();
-    RTCMillis = millis() % 1000;//calculate milliseconds
+    RTCMillis = ((millis() % 1000)) / 1000;//calculate milliseconds
     missec = now.second() + RTCMillis;
     return;
 }
@@ -262,10 +290,9 @@ void downlink_telem()
     {
         curPacket = String(String(TeamID) + ',' + mish + ':' + mismin + ':' + String(missec) + ',' + packets + ",C," + mode + ',' + tpRelease + ',' + String(altitude) + ',' + temp + ',' + voltage + ',' + GPS_hour + ':' + GPS_min + ':' + GPS_sec + ',' + GPS_Lat + ',' + GPS_Lon + ',' + GPS_alt + ',' + GPS_Sats + ',' + String(state) + ',' + echo);
         Serial4.println(String(curPacket));//write telemetry to open log
-        if (CX == 1)
+        if (CX)//transmit to GND if telemetry is enabled
         {
-            Serial1.println(String(curPacket));
-            
+            Serial1.println(String(curPacket));   
         }
         packets++;//increment packet count
         lastCPoll = millis();
@@ -278,14 +305,17 @@ void downlink_telem()
 
 bool check_landing()
 {
-    if (millis() - lastReadAlt >= 1000)//check every 1 sec
+    if (millis() - lastReadAlt >= 2000)//check every 2 sec
     {
         altitude = get_altitude();
-        if (altitude < lastAlt + 1 && altitude > lastAlt - 1)
+        if (altitude < lastAlt + 1 && altitude > lastAlt - 1 && altitude < 100)
         {
             return true;
         }
+        lastReadAlt = millis();
+        lastAlt = altitude;
         return false;
+
     }
     return false;
 }
@@ -429,18 +459,9 @@ void loop() {
             poll_payload();
         }
 
-        if (millis() - lastReadAlt > 1000)//state check
+        if (check_landing())//state check
         {
-            if (altitude < lastAlt+1 && altitude >lastAlt-1)
-            {
-                state = Grnd;
-
-            }
-            else
-            {
-                lastReadAlt = millis();
-                lastAlt = altitude;
-            }
+            state = Grnd;
         }
         break;
     case Grnd:
