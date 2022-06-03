@@ -19,6 +19,7 @@
 #define TeamID 1092
 #define flightLowerTime 1000 //lower time for flight mode (ms)
 #define simLowerTime 1000 //lower time for simulation mode (ms)
+#define serialTimeout 300 //Timeout for waiting on serial input (ms)
 
 
 //Telemetry Values
@@ -28,8 +29,8 @@ int GPS_Sats, GPS_hour, GPS_min, SimMode;//GPS Sattelites, GPS: Hour, GPS:Minute
 float missec = 0.0, GPS_sec;//Mission seconds + milliseconds, gps time seconds
 char mode = 'F';//F for flight, S for simulation
 String echo = "NUL", curPacket = "";//Last command with its arguments, no space
-bool ledstat = false, CX = false, lowerStat = false;
-char tpRelease = 'N';//Default payload not released 'T' for released?
+bool ledstat = false, CX = true, lowerStat = false;
+char tpRelease = 'N', inChar ;//Default payload not released 'T' for released?
 float altitude;
 
 //Operation Values
@@ -44,7 +45,7 @@ enum states
 };
 
 float lastAlt = -5.0, simAlt = 0.0, seaLvlPres = 988.0, curPres, simPress;
-unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime,lastBlink, releaseStart;//last time readingAltitude, sampling Cont. sensors, polling payload 
+unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime,lastBlink, releaseStart, serialWait;//last time readingAltitude, sampling Cont. sensors, polling payload 
 double RTCMillis;
 int HrsI, MinI, SecI, lastDelim;
 states prev_state, state;
@@ -115,7 +116,7 @@ void I2C_Sensor_Init()
    
 
     digitalWrite(TESTLED, LOW);
-    Serial1.println("System Ready");
+    //Serial1.println("System Ready");
     return;
 }
 
@@ -123,13 +124,19 @@ void read_serial()
 {
     if (Serial2.available() > 0)
     {
-        while (Serial2.available() > 0 && Serial2.peek()!='\n')
+        
+        inChar = ' ';
+        serialWait = millis();
+        while (millis() - serialWait < serialTimeout)
         {
-            curPacket += Serial2.read();
-        }
-        if (Serial2.peek()=='\n')
-        {
-            tempString = Serial2.read();
+            if (Serial2.available())
+            {
+                inChar = Serial2.read();
+                if (inChar == '\n')
+                    break;
+                curPacket += String(inChar);
+            }
+
         }
 
         if(curPacket.substring(0, 6) == "1092,T")//if team matches && is Payload packet
@@ -153,14 +160,26 @@ void read_serial()
 
     if (Serial1.available() > 0)//if GND serial data is available
     {
-        while (Serial1.available() > 0 && Serial1.peek() != '\n')//take in the command until NL character
+        cmd = "";
+        inChar = ' ';
+        serialWait = millis();
+        while (millis() - serialWait < serialTimeout)
         {
-            cmd += Serial1.read();
+            if (Serial1.available())
+            {
+                inChar = Serial1.read();
+                if (inChar == '\n')
+                    break;
+                cmd += String(inChar);
+            }
+            
         }
-        if (Serial1.peek() == '\n')
-        {
-            tempString = Serial1.read();
-        }
+       // while (Serial1.available() || millis() - serialWait < serialTimeout)//take in the command until NL character
+       // {
+           
+       // }
+
+        Serial1.println(String(cmd));
 
         if (cmd.substring(0, 8) == "CMD,1092")//if packet is CMD for 1092
         {
@@ -236,7 +255,6 @@ void read_serial()
                 return;
             }
         }
-        
     }
     return;
 }
@@ -297,7 +315,7 @@ void update_time()
     now = rtc.now();
     mish = now.hour();
     mismin = now.minute();
-    RTCMillis = ((millis() % 1000)) / 1000;//calculate milliseconds
+    RTCMillis = ((millis() % 1000)) / 1000.0;//calculate milliseconds
     missec = now.second() + RTCMillis;
     return;
 }
@@ -433,6 +451,7 @@ void loop() {
     case Stby:
         if (millis() - lastReadAlt > 2000)//state check
         {
+            
             if (altitude >= 20.0)
             {
                 state = Asc;
