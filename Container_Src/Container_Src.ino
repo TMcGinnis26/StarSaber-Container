@@ -15,11 +15,12 @@
 #include <TinyGPSPlus.h>
 
 #define GPSSerial Serial3
-#define TESTLED 9
+#define TESTLED 13
 #define TeamID 1092
 #define flightLowerTime 1000 //lower time for flight mode (ms)
 #define simLowerTime 1000 //lower time for simulation mode (ms)
 #define serialTimeout 300 //Timeout for waiting on serial input (ms)
+#define SERIAL2TIMEOUT 1500 //Timeout for serial line 2 (ms)
 
 
 //Telemetry Values
@@ -47,7 +48,7 @@ enum states
 float lastAlt = -5.0, simAlt = 0.0, seaLvlPres = 988.0, curPres, simPress;
 unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime,lastBlink, releaseStart, serialWait;//last time readingAltitude, sampling Cont. sensors, polling payload 
 double RTCMillis;
-int HrsI, MinI, SecI, lastDelim;
+int HrsI, MinI, SecI, lastDelim, Payload_Packets;
 states prev_state, state;
 String cmd, tempString;
 DateTime now;
@@ -122,40 +123,7 @@ void I2C_Sensor_Init()
 
 void read_serial()
 {
-    if (Serial2.available() > 0)
-    {
-        
-        inChar = ' ';
-        serialWait = millis();
-        while (millis() - serialWait < serialTimeout)
-        {
-            if (Serial2.available())
-            {
-                inChar = Serial2.read();
-                if (inChar == '\n')
-                    break;
-                curPacket += String(inChar);
-            }
-
-        }
-
-        if(curPacket.substring(0, 6) == "1092,T")//if team matches && is Payload packet
-        {
-            
-            sample_sensors();
-
-            curPacket = curPacket.substring(4);//remove front of packet
-            cmd = String(TeamID) + "," + String(mish) + ":" + String(mismin) + ":" + String(missec)+","+packets;
-            cmd += curPacket;
-
-            Serial4.println(cmd);//record to open log
-            Serial1.println(cmd);//send to GND
-            packets++;
-        }
-        cmd = "";
-        curPacket = "";
-    }
-
+    
 
 
     if (Serial1.available() > 0)//if GND serial data is available
@@ -179,7 +147,7 @@ void read_serial()
            
        // }
 
-        Serial1.println(String(cmd));
+        //Serial1.println(String(cmd));
 
         if (cmd.substring(0, 8) == "CMD,1092")//if packet is CMD for 1092
         {
@@ -269,16 +237,7 @@ void sample_sensors()
     voltage = ina260.readBusVoltage()*0.001;
     altitude = get_altitude();
 
-    if (ledstat)
-    {
-        digitalWrite(TESTLED, LOW);
-        ledstat = false;
-    }
-    else
-    {
-        digitalWrite(TESTLED, HIGH);
-        ledstat = true;
-    }
+  
 
     //Read GPS
     if (GPSSerial.available() > 0) {
@@ -323,7 +282,7 @@ void update_time()
 
 void poll_payload()
 {
-    Serial2.println("CMD,1092,POLL");//poll payload for telemetry
+    //Serial2.println("CMD,1092,POLL");//poll payload for telemetry
     return;
 }
 
@@ -353,7 +312,7 @@ void lowerPayload()
 
 void downlink_telem()
 {
-    if ((millis() - lastCPoll) >= 900)//slightly faster than 1 sec
+    if ((millis() - lastCPoll) >= 950)//slightly faster than 1 sec
     {
         curPacket = String(String(TeamID) + ',' + mish + ':' + mismin + ':' + String(missec) + ',' + packets + ",C," + mode + ',' + tpRelease + ',' + String(altitude) + ',' + temp + ',' + voltage + ',' + GPS_hour + ':' + GPS_min + ':' + GPS_sec + ',' + GPS_Lat + ',' + GPS_Lon + ',' + GPS_alt + ',' + GPS_Sats + ',' + String(state) + ',' + echo);
         Serial4.println(String(curPacket));//write telemetry to open log
@@ -393,6 +352,40 @@ void updateEEPROM()
     return;
 }
 
+void read_payload()
+{
+
+    if (Serial2.available() > 0)
+    {
+        inChar = ' ';
+        serialWait = millis();
+        while (millis() - serialWait < SERIAL2TIMEOUT && Payload_Packets < 4 )
+        {
+            if (Serial2.available())
+            {
+                inChar = Serial2.read();
+                if (inChar == '\n')
+                {
+                    if (curPacket.substring(0, 6) == "1092,T")//if team matches && is Payload packet
+                    {
+                        sample_sensors();
+                        curPacket = curPacket.substring(4);//remove front of packet
+                        cmd = String(TeamID) + "," + String(mish) + ":" + String(mismin) + ":" + String(missec) + "," + packets;
+
+                        Serial4.println(cmd + curPacket);//record to open log
+                        Serial1.println(cmd + curPacket);//send to GND
+                        packets++;
+                    }
+                    cmd = "";
+                    curPacket = "";
+                    Payload_Packets++;
+                }
+            }
+        }
+        Payload_Packets = 0;
+    }
+    return;
+}
 
 float get_altitude()
 {
@@ -482,7 +475,6 @@ void loop() {
         {
             if (altitude <= 400)
             {
-                Serial2.println("CMD,1092,PWRON,"+String(seaLvlPres));//send POWERON cmd to payload
                 //payload release servo
                 state = Desc2;
             }
@@ -513,13 +505,8 @@ void loop() {
         {
             lowerPayload();
         }
-        
-        if(millis() - lastTPoll >=220)//if time to poll payload
-        {
-            lastTPoll = millis();
-            poll_payload();
-            
-        }
+
+        read_payload();
 
         if (check_landing())//state check
         {
@@ -537,6 +524,7 @@ void loop() {
     }
     sample_sensors();
     read_serial();//Read incomming serial data (xbees)
+
     downlink_telem();//send data to ground if time and telem on
 
     //check for commands after each flight function if serial recieved
