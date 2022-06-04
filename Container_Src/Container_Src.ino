@@ -434,7 +434,7 @@ void setup() {
 }
 
 ////////////////////////////////////////
-//***Primary Flight State Functions***//
+//***Primary Flight State Functis***//
 ////////////////////////////////////////
 
 
@@ -482,7 +482,7 @@ void loop() {
         {
             if (altitude <= 400)
             {
-                Serial2.println("CMD,1092,POWERON");//send POWERON cmd to payload
+                Serial2.println("CMD,1092,PWRON,"+String(seaLvlPres));//send POWERON cmd to payload
                 //payload release servo
                 state = Desc2;
             }
@@ -514,9 +514,11 @@ void loop() {
             lowerPayload();
         }
         
-        if(millis() - lastTPoll >=240)//if time to poll payload
+        if(millis() - lastTPoll >=220)//if time to poll payload
         {
+            lastTPoll = millis();
             poll_payload();
+            
         }
 
         if (check_landing())//state check
