@@ -26,11 +26,11 @@
 //Telemetry Values
 float voltage, temp, pError, GPS_Lat, GPS_Lon, GPS_alt;//voltage draw, altitude, temperature, pointing error
 int packets = 1, mish = 0, mismin = 0;//Packet Count, Flight State(moved to operation vars), Mission Hours, Mission Minutes 
-int GPS_Sats, GPS_hour, GPS_min, SimMode;//GPS Sattelites, GPS: Hour, GPS:Minutes, TelemetryState; 
-float missec = 0.0, GPS_sec;//Mission seconds + milliseconds, gps time seconds
+int GPS_Sats, GPS_hour, GPS_min, GPS_sec, SimMode;//GPS Sattelites, GPS: Hour, GPS:Minutes, TelemetryState; 
+float missec = 0.0;//Mission seconds + milliseconds, gps time seconds
 char mode = 'F';//F for flight, S for simulation
-String echo = "NUL", curPacket = "";//Last command with its arguments, no space
-bool ledstat = false, CX = true, lowerStat = false;
+String echo = "NUL", curPacket = "", payloadCurPacket = "";//Last command with its arguments, no space
+bool ledstat = false, CX = false, lowerStat = false;
 char tpRelease = 'N', inChar ;//Default payload not released 'T' for released?
 float altitude;
 
@@ -50,7 +50,7 @@ unsigned int lastReadAlt, lastCPoll = 0, lastTPoll = 0, lastSampleTime,lastBlink
 double RTCMillis;
 int HrsI, MinI, SecI, lastDelim, Payload_Packets;
 states prev_state, state;
-String cmd, tempString;
+String cmd, tempString, payloadCmd;
 DateTime now;
 
 Adafruit_INA260 ina260 = Adafruit_INA260();
@@ -124,8 +124,6 @@ void I2C_Sensor_Init()
 void read_serial()
 {
     
-
-
     if (Serial1.available() > 0)//if GND serial data is available
     {
         cmd = "";
@@ -237,8 +235,6 @@ void sample_sensors()
     voltage = ina260.readBusVoltage()*0.001;
     altitude = get_altitude();
 
-  
-
     //Read GPS
     if (GPSSerial.available() > 0) {
         if (gps.encode(GPSSerial.read()))
@@ -282,7 +278,7 @@ void update_time()
 
 void poll_payload()
 {
-    //Serial2.println("CMD,1092,POLL");//poll payload for telemetry
+    Serial2.println("CMD,1092,POLL");//poll payload for telemetry
     return;
 }
 
@@ -318,7 +314,7 @@ void downlink_telem()
         Serial4.println(String(curPacket));//write telemetry to open log
         if (CX)//transmit to GND if telemetry is enabled
         {
-            Serial1.println(String(curPacket));   
+            Serial1.println(String(curPacket));
         }
         packets++;//increment packet count
         lastCPoll = millis();
@@ -361,25 +357,31 @@ void read_payload()
         serialWait = millis();
         while (millis() - serialWait < SERIAL2TIMEOUT && Payload_Packets < 4 )
         {
-            if (Serial2.available())
+            while (Serial2.available())
             {
                 inChar = Serial2.read();
                 if (inChar == '\n')
                 {
-                    if (curPacket.substring(0, 6) == "1092,T")//if team matches && is Payload packet
+                    if (payloadCurPacket.substring(0, 6) == "1092,T")//if team matches && is Payload packet
                     {
+                        payloadCurPacket = payloadCurPacket.substring(4);//remove front of packet
                         sample_sensors();
-                        curPacket = curPacket.substring(4);//remove front of packet
-                        cmd = String(TeamID) + "," + String(mish) + ":" + String(mismin) + ":" + String(missec) + "," + packets;
+                        
+                        payloadCmd = String(TeamID) + "," + String(mish) + ":" + String(mismin) + ":" + String(missec) + "," + packets;
 
-                        Serial4.println(cmd + curPacket);//record to open log
-                        Serial1.println(cmd + curPacket);//send to GND
+                        Serial4.println(payloadCmd + payloadCurPacket);//record to open log
+                        Serial1.println(payloadCmd + payloadCurPacket);//send to GND
                         packets++;
                     }
-                    cmd = "";
-                    curPacket = "";
+                    payloadCmd = "";
+                    payloadCurPacket = "";
                     Payload_Packets++;
                 }
+                else
+                {
+                    payloadCurPacket += String(inChar);
+                }
+
             }
         }
         Payload_Packets = 0;
@@ -409,7 +411,7 @@ void setup() {
     //Start All Sensors
     Serial.begin(9600);
     Serial1.begin(9600);//ground xbee
-    Serial2.begin(9600);//payload xbee
+    Serial2.begin(115200);//payload xbee
     Serial4.begin(9600);//Open Log
     GPSSerial.begin(9600);
 
@@ -506,6 +508,8 @@ void loop() {
             lowerPayload();
         }
 
+        poll_payload();
+        delay(50);
         read_payload();
 
         if (check_landing())//state check
